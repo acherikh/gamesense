@@ -1,0 +1,36 @@
+--- Maven ---
+
+target/
+*.log
+
+--- Python (Data Ingestion) ---
+
+data-ingestion/pycache/
+data-ingestion/*.py[cod]
+data-ingestion/venv/
+data-ingestion/.env
+
+--- IDEs ---
+
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+
+--- OS Specific ---
+
+.DS_Store
+Thumbs.db
+
+--- Docker ---
+
+mongo-data/
+neo4j-data/
+redis-data/
+
+--- Secrets ---
+
+.env
+mongo-keyfile

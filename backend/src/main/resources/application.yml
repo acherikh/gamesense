@@ -1,0 +1,75 @@
+spring:
+  application:
+    name: gamesense
+  
+  data:
+    mongodb:
+      uri: ${SPRING_DATA_MONGODB_URI:mongodb://mongos:27017/gamesense}
+      database: gamesense
+          
+    neo4j:
+      uri: ${SPRING_NEO4J_URI:bolt://localhost:7687}
+      authentication:
+        username: ${SPRING_NEO4J_AUTHENTICATION_USERNAME:neo4j}
+        password: ${SPRING_NEO4J_AUTHENTICATION_PASSWORD:password123}
+    
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+      timeout: 60000ms
+
+  cache:
+    type: redis
+    redis:
+      time-to-live: 3600000 # 1 hour
+
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    deserialization:
+      fail-on-unknown-properties: false
+
+server:
+  port: 8080
+  error:
+    include-message: always
+    include-binding-errors: always
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+
+# API Keys
+igdb:
+  client-id: ${IGDB_CLIENT_ID:your_igdb_client_id}
+  client-secret: ${IGDB_CLIENT_SECRET:your_igdb_client_secret}
+  api-url: https://api.igdb.com/v4
+
+pandascore:
+  api-key: ${PANDASCORE_API_KEY:your_pandascore_key}
+  api-url: https://api.pandascore.co
+
+# Custom configurations
+gamesense:
+  consistency:
+    retry:
+      max-attempts: 3
+      backoff-delay: 1000
+      max-delay: 10000
+  analytics:
+    trending-window-days: 7
+  batch:
+    size: 100
+
+logging:
+  level:
+    com.gamesense: DEBUG
+    org.springframework.data.mongodb: INFO
+    org.neo4j.driver: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"

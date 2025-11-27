@@ -1,0 +1,175 @@
+services:
+  # MongoDB Replica Set
+  mongo-primary:
+    image: mongo:7.0
+    container_name: mongo-primary
+    command: mongod --replSet rs0 --bind_ip_all --port 27017 --keyFile /etc/mongo/mongo-keyfile
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-primary-data:/data/db
+      - ./scripts:/scripts
+      # Mount the keyfile (Read-Only)
+      - ./mongo-keyfile:/etc/mongo/mongo-keyfile:ro
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin123
+    networks:
+      - gamesense-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mongo-secondary-1:
+    image: mongo:7.0
+    container_name: mongo-secondary-1
+    command: mongod --replSet rs0 --bind_ip_all --port 27018 --keyFile /etc/mongo/mongo-keyfile
+    ports:
+      - "27018:27018"
+    volumes:
+      - mongo-secondary-1-data:/data/db
+      # Mount the keyfile
+      - ./mongo-keyfile:/etc/mongo/mongo-keyfile:ro
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin123
+    networks:
+      - gamesense-network
+    depends_on:
+      - mongo-primary
+
+  mongo-secondary-2:
+    image: mongo:7.0
+    container_name: mongo-secondary-2
+    # Update Command: Add --keyFile
+    command: mongod --replSet rs0 --bind_ip_all --port 27019 --keyFile /etc/mongo/mongo-keyfile
+    ports:
+      - "27019:27019"
+    volumes:
+      - mongo-secondary-2-data:/data/db
+      # Mount the keyfile
+      - ./mongo-keyfile:/etc/mongo/mongo-keyfile:ro
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin123
+    networks:
+      - gamesense-network
+    depends_on:
+      - mongo-primary 
+  # Neo4j Graph Database
+  neo4j:
+    image: neo4j:5.13
+    container_name: neo4j
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4j-data:/data
+      - neo4j-logs:/logs
+    environment:
+      - NEO4J_AUTH=neo4j/password123
+      - NEO4J_PLUGINS=["graph-data-science"]
+      - NEO4J_server_memory_heap_max__size=2G
+      - NEO4J_server_memory_pagecache_size=1G
+      - NEO4J_dbms_security_procedures_unrestricted=gds.*
+    networks:
+      - gamesense-network
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p password123 'RETURN 1'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - gamesense-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # Spring Boot Application
+  app:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: gamesense-app
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATA_MONGODB_URI: mongodb://admin:admin123@mongo-primary:27017,mongo-secondary-1:27018,mongo-secondary-2:27019/gamesense?replicaSet=rs0&authSource=admin
+      SPRING_NEO4J_URI: bolt://neo4j:7687
+      SPRING_NEO4J_AUTHENTICATION_USERNAME: neo4j
+      SPRING_NEO4J_AUTHENTICATION_PASSWORD: password123
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      IGDB_CLIENT_ID: ${IGDB_CLIENT_ID}
+      IGDB_CLIENT_SECRET: ${IGDB_CLIENT_SECRET}
+      PANDASCORE_API_KEY: ${PANDASCORE_API_KEY}
+    networks:
+      - gamesense-network
+    depends_on:
+      mongo-primary:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Data Ingestion Service
+  data-ingestion:
+    build:
+      context: ./data-ingestion
+      dockerfile: Dockerfile
+    container_name: data-ingestion
+    environment:
+      MONGODB_URI: mongodb://admin:admin123@mongo-primary:27017,mongo-secondary-1:27018,mongo-secondary-2:27019/gamesense?replicaSet=rs0&authSource=admin
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: password123
+      IGDB_CLIENT_ID: ${IGDB_CLIENT_ID}
+      IGDB_CLIENT_SECRET: ${IGDB_CLIENT_SECRET}
+      PANDASCORE_API_KEY: ${PANDASCORE_API_KEY}
+    networks:
+      - gamesense-network
+    depends_on:
+      - app
+    restart: unless-stopped
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./frontend/dist:/usr/share/nginx/html:ro
+    networks:
+      - gamesense-network
+    depends_on:
+      - app
+
+volumes:
+  mongo-primary-data:
+  mongo-secondary-1-data:
+  mongo-secondary-2-data:
+  neo4j-data:
+  neo4j-logs:
+  redis-data:
+
+networks:
+  gamesense-network:
+    driver: bridge
