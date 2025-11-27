@@ -50,7 +50,7 @@ start: keyfile
 # Stop all services
 stop:
 	@echo "Stopping GameSense services..."
-	docker compose down
+	docker compose down -v --remove-orphans
 	@echo "Services stopped successfully!"
 
 # Restart all services
@@ -91,7 +91,7 @@ test:
 # Clean up everything
 clean:
 	@echo "Removing all containers and volumes..."
-	docker compose down -v
+	docker compose down -v --remove-orphans
 	rm -f mongo-keyfile
 	@echo "Cleanup complete!"
 
