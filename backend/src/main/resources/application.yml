@@ -46,12 +46,12 @@ management:
 
 # API Keys
 igdb:
-  client-id: ${IGDB_CLIENT_ID:your_igdb_client_id}
-  client-secret: ${IGDB_CLIENT_SECRET:your_igdb_client_secret}
+  client-id: ${IGDB_CLIENT_ID:igdb_client_id}
+  client-secret: ${IGDB_CLIENT_SECRET:igdb_client_secret}
   api-url: https://api.igdb.com/v4
 
 pandascore:
-  api-key: ${PANDASCORE_API_KEY:your_pandascore_key}
+  api-key: ${PANDASCORE_API_KEY:pandascore_key}
   api-url: https://api.pandascore.co
 
 # Custom configurations
