@@ -233,15 +233,32 @@ class DataIngestionService:
             # 1. Sync Tournament
             if 'tournament' in match_data:
                 tourney = match_data['tournament']
+
+                league = match_data.get('league', {})
+                series = match_data.get('series', {})
+                
+                league_name = league.get('name', '')
+                series_name = series.get('full_name', '') or series.get('name', '')
+                tourney_stage = tourney.get('name', '')
+
+                # Construct a descriptive name: "League Series - Stage"
+                # Example: "ESL Pro League Season 18 - Playoffs"
+                parts = [p for p in [league_name, series_name, tourney_stage] if p]
+                full_tournament_name = " - ".join(parts)
+
                 with self.neo4j_driver.session() as session:
                     session.run("""
                         MERGE (t:Tournament {tournamentId: $tid})
                         SET t.name = $name,
-                            t.gameTitle = $game
+                            t.gameTitle = $game,
+                            t.league = $league,  // Optional: Save distinct properties
+                            t.series = $series   // Optional: Save distinct properties
                     """, {
                         'tid': str(tourney['id']),
-                        'name': tourney.get('name', 'Unknown'),
-                        'game': match_data['videogame']['name']
+                        'name': full_tournament_name,
+                        'game': match_data['videogame']['name'],
+                        'league': league_name,
+                        'series': series_name
                     })
 
             # 2. Sync Teams and Relationships
