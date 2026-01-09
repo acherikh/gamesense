@@ -30,12 +30,12 @@ keyfile:
 # Build Docker images
 build:
 	@echo "Building Docker images..."
-	docker compose build
+	docker compose --progress plain build 
 
 # Start all services
 start: keyfile
 	@echo "Starting GameSense services..."
-	docker compose up -d
+	docker compose --progress plain up -d
 	@echo "Waiting for services to be ready..."
 	@sleep 10
 	@echo "Services started successfully!"
@@ -50,7 +50,7 @@ start: keyfile
 # Stop all services
 stop:
 	@echo "Stopping GameSense services..."
-	docker compose down -v --remove-orphans
+	docker compose --progress plain down -v --remove-orphans
 	@echo "Services stopped successfully!"
 
 # Restart all services
@@ -58,13 +58,13 @@ restart: stop start
 
 # View logs
 logs:
-	docker compose logs -f
+	docker compose --progress plain logs -f
 
 # Initialize MongoDB replica set
 init-mongo:
 	@echo "Initializing MongoDB replica set..."
 	@sleep 5
-	docker exec -it mongo-primary bash /scripts/init-mongo-replica.sh
+	docker exec mongo-primary bash /scripts/init-mongo-replica.sh
 	@echo "MongoDB replica set initialized!"
 
 # Check health of all services
@@ -91,7 +91,7 @@ test:
 # Clean up everything
 clean:
 	@echo "Removing all containers and volumes..."
-	docker compose down -v --remove-orphans
+	docker compose --progress plain down -v --remove-orphans
 	rm -f mongo-keyfile
 	@echo "Cleanup complete!"
 
