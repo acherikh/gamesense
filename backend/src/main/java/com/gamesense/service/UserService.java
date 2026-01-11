@@ -1,6 +1,7 @@
 package com.gamesense.service;
 
 import com.gamesense.model.mongo.User;
+import com.gamesense.model.neo4j.GameStatus;
 import com.gamesense.model.neo4j.UserNode;
 import com.gamesense.repository.mongo.UserRepository;
 import com.gamesense.repository.neo4j.UserNodeRepository;
@@ -28,6 +29,7 @@ public class UserService implements UserDetailsService {
     private final UserRepository userRepository;
     private final UserNodeRepository userNodeRepository;
     private final PasswordEncoder passwordEncoder;
+    private final ConsistencyService consistencyService; // Inject ConsistencyService
 
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
@@ -79,6 +81,10 @@ public class UserService implements UserDetailsService {
         }
         
         return savedUser;
+    }
+
+    public void addGameToLibrary(String userId, String gameId, GameStatus status) {
+        consistencyService.addGameToLibrary(userId, gameId, status);
     }
 
     public Optional<User> findByUsername(String username) {

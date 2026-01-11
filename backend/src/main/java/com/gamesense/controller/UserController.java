@@ -1,6 +1,7 @@
 package com.gamesense.controller;
 
 import com.gamesense.model.mongo.User;
+import com.gamesense.model.neo4j.GameStatus; // Import GameStatus
 import com.gamesense.security.JwtTokenProvider;
 import com.gamesense.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -14,22 +15,24 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/api/auth")
+@RequestMapping("/api") // Changed to /api to match test script paths like /api/auth and /api/users
 @RequiredArgsConstructor
-@Tag(name = "Authentication", description = "User registration and login")
+@Tag(name = "User", description = "User management and auth")
 public class UserController {
 
     private final UserService userService;
     private final AuthenticationManager authenticationManager;
     private final JwtTokenProvider jwtTokenProvider;
 
-    @PostMapping("/register")
+    // --- AUTH ENDPOINTS ---
+
+    @PostMapping("/auth/register")
     @Operation(summary = "Register new user")
     public ResponseEntity<User> register(@RequestBody User user) {
         return ResponseEntity.ok(userService.registerUser(user));
     }
 
-    @PostMapping("/login")
+    @PostMapping("/auth/login")
     @Operation(summary = "Authenticate user and get token")
     public ResponseEntity<AuthResponse> login(@RequestBody AuthRequest request) {
         Authentication authentication = authenticationManager.authenticate(
@@ -38,6 +41,19 @@ public class UserController {
 
         String token = jwtTokenProvider.generateToken(authentication);
         return ResponseEntity.ok(new AuthResponse(token));
+    }
+
+    // --- USER ENDPOINTS ---
+
+    @PostMapping("/users/{userId}/games/{gameId}")
+    @Operation(summary = "Add game to user library (Dual Write)")
+    public ResponseEntity<Void> addGameToLibrary(
+            @PathVariable String userId,
+            @PathVariable String gameId,
+            @RequestParam(defaultValue = "PLAYING") GameStatus status) {
+        
+        userService.addGameToLibrary(userId, gameId, status);
+        return ResponseEntity.ok().build();
     }
     
     @Data
