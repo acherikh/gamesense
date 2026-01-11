@@ -4,6 +4,7 @@ import com.gamesense.dto.analytics.*;
 import com.mongodb.BasicDBObject;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.bson.Document; 
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.aggregation.*;
@@ -11,6 +12,7 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.springframework.data.mongodb.core.aggregation.Aggregation.*;
@@ -23,15 +25,33 @@ public class AnalyticsAggregationService {
     private final MongoTemplate mongoTemplate;
 
     /**
-     * AGGREGATION PIPELINE 1: The Hype Meter (Trending Games)
+     * Helper method to create a custom $lookup stage
+     * This bypasses the "Variable cannot be resolved" error by building the raw BSON directly.
+     * It also handles the ObjectId -> String conversion for joining.
+     */
+    private AggregationOperation getCustomLookupOperation() {
+        return context -> new Document("$lookup", new Document()
+                .append("from", "games")
+                .append("let", new Document("r_gameId", "$gameId"))
+                .append("pipeline", Arrays.asList(
+                        new Document("$match", new Document("$expr",
+                                new Document("$eq", Arrays.asList(
+                                        new Document("$toString", "$_id"), // Convert Game ObjectId to String
+                                        "$$r_gameId"                       // Match against Review gameId
+                                ))
+                        ))
+                ))
+                .append("as", "gameDetails"));
+    }
+
+    /**
+     * PIPELINE 1: Hype Meter
      */
     public List<TrendingGame> calculateHypeMeter(int days, int limit) {
         log.info("Calculating Hype Meter for last {} days", days);
-        
         LocalDateTime cutoffDate = LocalDateTime.now().minusDays(days);
         
         // Match stage: Filter recent reviews
-        // FIX: Check 'timestamp' OR 'createdAt' to handle manually inserted reviews
         MatchOperation matchRecent = match(
             new Criteria().orOperator(
                 Criteria.where("timestamp").gte(cutoffDate),
@@ -53,18 +73,13 @@ public class AnalyticsAggregationService {
         // Limit stage
         LimitOperation limitResults = limit(limit);
         
-        // Lookup stage: Join with games collection
-        LookupOperation lookupGame = lookup(
-            "games",
-            "gameId",
-            "_id",
-            "gameDetails"
-        );
+        // Custom Lookup (Replaces the broken Variable/MongoExpression code)
+        AggregationOperation lookupGame = getCustomLookupOperation();
         
-        // Unwind stage: Flatten game details
+        // Unwind stage
         UnwindOperation unwindGame = unwind("gameDetails");
         
-        // Project stage: Shape final output
+        // Project stage
         ProjectionOperation projectResult = project()
             .and("gameId").as("gameId")
             .and("gameDetails.title").as("title")
@@ -94,7 +109,7 @@ public class AnalyticsAggregationService {
     }
 
     /**
-     * AGGREGATION PIPELINE 2: Genre Dominance Over Time
+     * PIPELINE 2: Genre Dominance Over Time
      */
     public List<GenreTrend> analyzeGenreDominance() {
         log.info("Analyzing genre dominance over time");
@@ -157,7 +172,7 @@ public class AnalyticsAggregationService {
     }
 
     /**
-     * AGGREGATION PIPELINE 3: Esports Team Win Rates
+     * PIPELINE 3: Esports Team Win Rates
      */
     public List<TeamPerformance> calculateTeamWinRates(String gameTitle) {
         log.info("Calculating team win rates for game: {}", gameTitle);
@@ -168,9 +183,7 @@ public class AnalyticsAggregationService {
         }
         MatchOperation matchFinished = match(criteria);
         
-        // FIX: Use andExpression for field-to-field comparison
-        // ComparisonOperators.valueOf("field").equalTo("otherField") treats "otherField" as a string literal.
-        
+        // Correct logic: Compare field values (not strings)
         ProjectionOperation projectTeamA = project()
             .and("teamAId").as("teamId")
             .and("teamAName").as("teamName")
@@ -232,6 +245,9 @@ public class AnalyticsAggregationService {
         return results.getMappedResults();
     }
     
+    /**
+     * Sentiment Analysis
+     */
     public List<SentimentAnalysis> analyzeSentimentByGame(int limit) {
         log.info("Analyzing sentiment distribution by game");
         
@@ -247,12 +263,8 @@ public class AnalyticsAggregationService {
         
         LimitOperation limitResults = limit(limit);
         
-        LookupOperation lookupGame = lookup(
-            "games",
-            "gameId",
-            "_id",
-            "gameDetails"
-        );
+        // Use the custom lookup here as well
+        AggregationOperation lookupGame = getCustomLookupOperation();
         
         UnwindOperation unwindGame = unwind("gameDetails");
         

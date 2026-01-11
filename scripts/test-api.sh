@@ -294,6 +294,8 @@ fi
 
 # Create review (Protected)
 print_info "Testing Review Creation..."
+# FIX: Added timestamp to ensure Hype Meter aggregation picks it up
+TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 REVIEW1=$(curl -s -X POST "$BASE_URL/api/reviews" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
@@ -303,6 +305,7 @@ REVIEW1=$(curl -s -X POST "$BASE_URL/api/reviews" \
     "content": "Great game for testing!",
     "rating": 9,
     "sentimentScore": 0.8,
+    "timestamp": "'"$TIMESTAMP"'",
     "source": "INTERNAL"
   }')
 REVIEW1_ID=$(echo "$REVIEW1" | jq -r '.id // empty')
@@ -310,6 +313,7 @@ if [ ! -z "$REVIEW1_ID" ] && [ "$REVIEW1_ID" != "null" ]; then
     print_success "Review created: $REVIEW1_ID"
 else
     print_error "Failed to create review"
+    echo "Response: $REVIEW1"
 fi
 
 # ============================================================
@@ -319,6 +323,8 @@ print_header "PHASE 4: Analytics Testing"
 
 # Public Analytics Endpoints
 print_info "Testing Hype Meter..."
+# Trending games usually require multiple reviews or specific timeline. 
+# We just check if it doesn't error out.
 TRENDING=$(curl -s "$BASE_URL/api/analytics/trending?days=7&limit=5")
 if [ "$(echo "$TRENDING" | jq 'length')" -ge 0 ]; then
     print_success "Hype Meter responding"
