@@ -3,6 +3,7 @@ import time
 import requests
 import schedule
 import logging
+import re
 from datetime import datetime
 from pymongo import MongoClient
 from neo4j import GraphDatabase
@@ -54,7 +55,7 @@ class DataIngestionService:
             logger.error(f"IGDB authentication failed: {response.text}")
     
     def ingest_games(self, limit=100):
-        """Ingest games from IGDB"""
+        """Ingest games from IGDB, including Steam IDs for review fetching"""
         logger.info(f"Ingesting {limit} games from IGDB...")
         
         headers = {
@@ -62,10 +63,11 @@ class DataIngestionService:
             'Authorization': f'Bearer {self.igdb_token}'
         }
         
-        # Query for popular recent games
+        # Query for popular recent games, asking for external_games (Steam ID)
         body = f"""
             fields name, summary, cover.url, genres.name, platforms.name,
-                   first_release_date, rating, involved_companies.company.name;
+                   first_release_date, rating, involved_companies.company.name,
+                   external_games.category, external_games.uid;
             where rating > 70 & first_release_date > 1577836800;
             sort rating desc;
             limit {limit};
@@ -92,9 +94,20 @@ class DataIngestionService:
         except Exception as e:
             logger.error(f"Error ingesting games: {e}")
     
+    def extract_steam_id(self, game_data):
+        """Extract Steam App ID from IGDB external_games"""
+        if 'external_games' in game_data:
+            for ext in game_data['external_games']:
+                # Category 1 is Steam in IGDB
+                if ext.get('category') == 1:
+                    return ext.get('uid')
+        return None
+
     def save_game(self, game_data):
         """Save game to MongoDB and Neo4j"""
         try:
+            steam_id = self.extract_steam_id(game_data)
+            
             # Prepare game document
             game_doc = {
                 '_id': str(game_data['id']),
@@ -108,23 +121,17 @@ class DataIngestionService:
                 'developer': self.extract_developer(game_data),
                 'avgScore': game_data.get('rating', 0) / 10.0 if game_data.get('rating') else None,
                 'coverImageUrl': self.get_cover_url(game_data),
+                'steamId': steam_id,  # Save Steam ID for review fetching
                 'totalReviews': 0,
-                'createdAt': datetime.now(),
                 'updatedAt': datetime.now()
             }
             
-            # Insert into MongoDB
-            created_at_val = game_doc['createdAt'] 
-            
-            # 2. Remove it for the MongoDB $set operation
-            game_doc.pop('createdAt') 
-
-            # 3. Update MongoDB
+            # Upsert into MongoDB (preserve createdAt)
             self.db.games.update_one(
                 {'_id': game_doc['_id']},
                 {
                     '$set': game_doc,
-                    '$setOnInsert': {'createdAt': created_at_val} # Use the variable
+                    '$setOnInsert': {'createdAt': datetime.now()}
                 },
                 upsert=True
             )
@@ -140,10 +147,10 @@ class DataIngestionService:
                     'gameId': game_doc['_id'],
                     'title': game_doc['title'],
                     'genres': game_doc['genres'],
-                    'createdAt': created_at_val.isoformat()
+                    'createdAt': datetime.now().isoformat()
                 })
             
-            logger.info(f"Saved game: {game_doc['title']}")
+            logger.info(f"Saved game: {game_doc['title']} (Steam ID: {steam_id})")
             
         except Exception as e:
             logger.error(f"Error saving game: {e}")
@@ -166,16 +173,9 @@ class DataIngestionService:
     def ingest_esports_data(self):
         """Ingest esports matches from PandaScore"""
         logger.info("Ingesting esports data from PandaScore...")
-        
         headers = {'Authorization': f'Bearer {self.pandascore_api_key}'}
-        
-        # 1. Fetch Running Matches
         self._fetch_and_save_matches(headers, '/matches/running')
-        
-        # 2. Fetch Upcoming Matches (CRITICAL FIX: Added this line)
         self._fetch_and_save_matches(headers, '/matches/upcoming', params={'per_page': 50, 'sort': 'begin_at'})
-
-        # 3. Fetch Past Matches
         self._fetch_and_save_matches(headers, '/matches/past', params={'per_page': 50})
     
     def _fetch_and_save_matches(self, headers, endpoint, params=None):
@@ -194,10 +194,9 @@ class DataIngestionService:
             logger.error(f"Error fetching {endpoint}: {e}")
     
     def save_match(self, match_data):
-        """Save match to MongoDB"""
+        """Save match to MongoDB and Sync to Neo4j"""
         try:
             opponents = match_data.get('opponents', [])
-            
             team_a = opponents[0]['opponent'] if len(opponents) > 0 else {}
             team_b = opponents[1]['opponent'] if len(opponents) > 1 else {}
             
@@ -218,57 +217,32 @@ class DataIngestionService:
                 'updatedAt': datetime.now()
             }
             
-            self.db.matches.update_one(
-                {'_id': match_doc['_id']},
-                {'$set': match_doc},
-                upsert=True
-            )
-            
+            self.db.matches.update_one({'_id': match_doc['_id']}, {'$set': match_doc}, upsert=True)
             logger.info(f"Saved match: {match_doc['teamAName']} vs {match_doc['teamBName']}")
-            
+
+            # Sync Graph
+            if 'tournament' in match_data:
+                self.sync_tournament_graph(match_data)
+                
         except Exception as e:
             logger.error(f"Error saving match: {e}")
 
+    def sync_tournament_graph(self, match_data):
         try:
-            # 1. Sync Tournament
-            if 'tournament' in match_data:
-                tourney = match_data['tournament']
-
-                league = match_data.get('league', {})
-                series = match_data.get('series', {})
+            tourney = match_data['tournament']
+            with self.neo4j_driver.session() as session:
+                session.run("""
+                    MERGE (t:Tournament {tournamentId: $tid})
+                    SET t.name = $name, t.gameTitle = $game
+                """, {
+                    'tid': str(tourney['id']),
+                    'name': tourney.get('name', 'Unknown'),
+                    'game': match_data['videogame']['name']
+                })
                 
-                league_name = league.get('name', '')
-                series_name = series.get('full_name', '') or series.get('name', '')
-                tourney_stage = tourney.get('name', '')
-
-                # Construct a descriptive name: "League Series - Stage"
-                # Example: "ESL Pro League Season 18 - Playoffs"
-                parts = [p for p in [league_name, series_name, tourney_stage] if p]
-                full_tournament_name = " - ".join(parts)
-
-                with self.neo4j_driver.session() as session:
-                    session.run("""
-                        MERGE (t:Tournament {tournamentId: $tid})
-                        SET t.name = $name,
-                            t.gameTitle = $game,
-                            t.league = $league,  // Optional: Save distinct properties
-                            t.series = $series   // Optional: Save distinct properties
-                    """, {
-                        'tid': str(tourney['id']),
-                        'name': full_tournament_name,
-                        'game': match_data['videogame']['name'],
-                        'league': league_name,
-                        'series': series_name
-                    })
-
-            # 2. Sync Teams and Relationships
-            opponents = match_data.get('opponents', [])
-            for opp in opponents:
-                team = opp.get('opponent', {})
-                if not team.get('id'): continue
-                
-                with self.neo4j_driver.session() as session:
-                    # Sync Team and create COMPETES_IN relationship
+                for opp in match_data.get('opponents', []):
+                    team = opp.get('opponent', {})
+                    if not team.get('id'): continue
                     session.run("""
                         MERGE (t:Team {teamId: $teamId})
                         SET t.name = $name, t.gameTitle = $gameTitle
@@ -281,90 +255,107 @@ class DataIngestionService:
                         'gameTitle': match_data['videogame']['name'],
                         'tourId': str(match_data['tournament']['id'])
                     })
-            logger.info(f"Synced graph data for match {match_data['id']}")
-        
         except Exception as e:
-            logger.error(f"Error syncing graph data: {e}")
-    
+            logger.error(f"Error syncing graph: {e}")
+
     def map_status(self, status):
-        """Map PandaScore status to internal status"""
-        mapping = {
-            'running': 'LIVE',
-            'finished': 'FINISHED',
-            'not_started': 'SCHEDULED',
-            'canceled': 'CANCELLED',
-            'postponed': 'POSTPONED'
-        }
+        mapping = {'running': 'LIVE', 'finished': 'FINISHED', 'not_started': 'SCHEDULED', 'canceled': 'CANCELLED', 'postponed': 'POSTPONED'}
         return mapping.get(status.lower(), 'SCHEDULED')
     
     def parse_datetime(self, dt_string):
-        """Parse datetime string"""
-        if not dt_string:
-            return None
-        try:
-            return datetime.fromisoformat(dt_string.replace('Z', '+00:00'))
-        except:
-            return None
-    
-    def generate_sample_reviews(self, count=1000):
-        """Generate sample reviews for testing"""
-        logger.info(f"Generating {count} sample reviews...")
+        if not dt_string: return None
+        try: return datetime.fromisoformat(dt_string.replace('Z', '+00:00'))
+        except: return None
+
+    # --- REAL STEAM REVIEW INGESTION ---
+    def analyze_sentiment(self, text):
+        """Simple heuristic sentiment analysis"""
+        positive = ['good', 'great', 'amazing', 'love', 'best', 'fun', 'excellent', 'masterpiece']
+        negative = ['bad', 'worst', 'boring', 'hate', 'trash', 'broken', 'buggy', 'awful']
+        text_lower = text.lower()
+        score = 0
+        for w in positive: 
+            if w in text_lower: score += 0.2
+        for w in negative: 
+            if w in text_lower: score -= 0.2
+        return max(min(score, 1.0), -1.0)
+
+    def ingest_steam_reviews(self):
+        """Fetch real reviews from Steam API for games with Steam IDs"""
+        logger.info("Starting Steam Review Ingestion...")
         
-        games = list(self.db.games.find().limit(50))
+        # Find games in MongoDB that have a steamId
+        games = list(self.db.games.find({"steamId": {"$exists": True, "$ne": None}}))
+        logger.info(f"Found {len(games)} games with Steam IDs.")
         
-        if not games:
-            logger.warning("No games found for review generation")
-            return
-        
-        import random
-        from datetime import timedelta
-        
-        sentiments = [
-            ("Amazing game! Love it!", 9, 0.9),
-            ("Pretty good, worth playing", 8, 0.7),
-            ("Decent game, has potential", 7, 0.5),
-            ("Average experience", 6, 0.3),
-            ("Disappointed with this one", 4, -0.5),
-            ("Not great, many issues", 3, -0.7),
-        ]
-        
-        for i in range(count):
-            game = random.choice(games)
-            sentiment = random.choice(sentiments)
+        for game in games:
+            steam_id = game['steamId']
+            game_id = game['_id']
+            logger.info(f"Fetching reviews for {game['title']} (Steam ID: {steam_id})")
             
-            review_doc = {
-                'gameId': game['_id'],
-                'userId': f"user_{random.randint(1, 100)}",
-                'content': sentiment[0],
-                'rating': sentiment[1],
-                'sentimentScore': sentiment[2],
-                'timestamp': datetime.now() - timedelta(days=random.randint(0, 30)),
-                'upvotes': random.randint(0, 50),
-                'downvotes': random.randint(0, 10),
-                'source': 'INTERNAL',
-                'createdAt': datetime.now()
-            }
-            
-            self.db.reviews.insert_one(review_doc)
-            
-            if i % 100 == 0:
-                logger.info(f"Generated {i} reviews...")
-        
-        logger.info("Sample review generation completed")
-    
+            try:
+                # Steam Web API: Get JSON reviews
+                url = f"https://store.steampowered.com/appreviews/{steam_id}?json=1&language=english&num_per_page=20"
+                resp = requests.get(url)
+                
+                if resp.status_code == 200:
+                    data = resp.json()
+                    reviews = data.get('reviews', [])
+                    
+                    if not reviews:
+                        continue
+                        
+                    for rev in reviews:
+                        # Map Steam review to internal schema
+                        sentiment = self.analyze_sentiment(rev.get('review', ''))
+                        review_doc = {
+                            'reviewId': str(rev.get('recommendationid')),
+                            'gameId': game_id,
+                            'userId': f"steam_{rev.get('author', {}).get('steamid')}",
+                            'content': rev.get('review', ''),
+                            'rating': 10 if rev.get('voted_up') else 0, # Steam is binary thumb up/down
+                            'sentimentScore': sentiment,
+                            'timestamp': datetime.fromtimestamp(rev.get('timestamp_created')),
+                            'upvotes': rev.get('votes_up', 0),
+                            'downvotes': 0, # Steam API doesn't expose downvotes easily in this endpoint
+                            'source': 'STEAM',
+                            'createdAt': datetime.now()
+                        }
+                        
+                        # Upsert review to avoid duplicates
+                        self.db.reviews.update_one(
+                            {'reviewId': review_doc['reviewId']},
+                            {'$set': review_doc},
+                            upsert=True
+                        )
+                    
+                    # Update Game stats
+                    self.db.games.update_one(
+                        {'_id': game_id},
+                        {'$inc': {'totalReviews': len(reviews)}}
+                    )
+                    
+                    time.sleep(1) # Be polite to Steam API
+                    
+                else:
+                    logger.warning(f"Failed to fetch Steam reviews for {steam_id}: {resp.status_code}")
+                    
+            except Exception as e:
+                logger.error(f"Error processing reviews for {game['title']}: {e}")
+
     def run_scheduled_tasks(self):
         """Run scheduled data ingestion tasks"""
         logger.info("Starting scheduled data ingestion service...")
         
         # Initial data load
-        self.ingest_games(limit=200)
+        self.ingest_games(limit=50) # Reduced for startup speed
         self.ingest_esports_data()
-        self.generate_sample_reviews(count=5000)
+        self.ingest_steam_reviews() # Fetch real reviews
         
         # Schedule periodic updates
         schedule.every(1).hours.do(self.ingest_esports_data)
-        schedule.every(6).hours.do(lambda: self.ingest_games(limit=50))
-        schedule.every(30).minutes.do(self.ingest_esports_data)
+        schedule.every(6).hours.do(lambda: self.ingest_games(limit=20))
+        schedule.every(12).hours.do(self.ingest_steam_reviews)
         
         logger.info("Scheduled tasks configured")
         

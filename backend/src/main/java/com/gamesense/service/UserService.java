@@ -1,86 +1,92 @@
 package com.gamesense.service;
 
-import com.gamesense.model.mongo.*;
-import com.gamesense.model.neo4j.UserNode; 
-import com.gamesense.repository.mongo.*;
-import com.gamesense.repository.neo4j.UserNodeRepository; 
+import com.gamesense.model.mongo.User;
+import com.gamesense.model.neo4j.UserNode;
+import com.gamesense.repository.mongo.UserRepository;
+import com.gamesense.repository.neo4j.UserNodeRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class UserService {
+public class UserService implements UserDetailsService {
 
     private final UserRepository userRepository;
-    private final UserNodeRepository userNodeRepository; 
-    private final DeadLetterQueueService deadLetterQueueService;
+    private final UserNodeRepository userNodeRepository;
+    private final PasswordEncoder passwordEncoder;
 
-    public Optional<User> getUserById(String id) {
-        return userRepository.findById(id);
+    @Override
+    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
+        
+        Set<SimpleGrantedAuthority> authorities = user.getRoles() != null 
+                ? user.getRoles().stream().map(SimpleGrantedAuthority::new).collect(Collectors.toSet())
+                : Collections.singleton(new SimpleGrantedAuthority("ROLE_USER"));
+
+        return new org.springframework.security.core.userdetails.User(
+                user.getUsername(),
+                user.getPassword(),
+                authorities
+        );
     }
 
-    public Optional<User> getUserByUsername(String username) {
-        return userRepository.findByUsername(username);
-    }
-
-    @Transactional
-    public User createUser(User user) {
-        // Check if username/email already exists
+    public User registerUser(User user) {
+        log.info("Registering new user: {}", user.getUsername());
+        
         if (userRepository.existsByUsername(user.getUsername())) {
-            throw new RuntimeException("Username already exists: " + user.getUsername());
+            throw new RuntimeException("Username already exists");
         }
         
         if (userRepository.existsByEmail(user.getEmail())) {
-            throw new RuntimeException("Email already exists: " + user.getEmail());
+            throw new RuntimeException("Email already exists");
         }
+        
+        // Secure Password
+        user.setPassword(passwordEncoder.encode(user.getPassword()));
+        
+        // Default Role
+        user.setRoles(new HashSet<>(Collections.singletonList("ROLE_USER")));
         
         user.setCreatedAt(LocalDateTime.now());
+        user.setUpdatedAt(LocalDateTime.now());
         
-        // 1. Save to MongoDB
-        User saved = userRepository.save(user);
+        User savedUser = userRepository.save(user);
         
-        // 2. Sync to Neo4j
+        // Sync to Neo4j (Best Effort)
         try {
             UserNode userNode = new UserNode();
-            userNode.setUserId(saved.getId());
-            userNode.setUsername(saved.getUsername());
-            userNode.setCreatedAt(saved.getCreatedAt());
+            userNode.setUserId(savedUser.getId());
+            userNode.setUsername(savedUser.getUsername());
+            userNode.setCreatedAt(savedUser.getCreatedAt());
             userNodeRepository.save(userNode);
-            log.info("Synced user to Neo4j: {}", saved.getUsername());
-            
         } catch (Exception e) {
-            log.error("Failed to sync user to Neo4j", e);
-            
-            // PRODUCTION REQUIREMENT: Handle the inconsistency
-            // Since we can't rollback the Mongo write easily (separate DBs),
-            // we send this to the DLQ so a background job or admin can fix the graph later.
-            deadLetterQueueService.logFailedOperation(
-                "CREATE_USER_GRAPH_NODE",
-                saved.getId(),
-                "UserNode",
-                "PENDING",
-                e.getMessage()
-            );
+            log.error("Failed to sync user to Neo4j: {}", e.getMessage());
         }
-
-        log.info("Created user: {}", saved.getUsername());
-        return saved;
+        
+        return savedUser;
     }
 
-    @Transactional
-    public User updateUser(String id, User user) {
-        User existing = userRepository.findById(id)
-            .orElseThrow(() -> new RuntimeException("User not found: " + id));
-        
-        existing.setBio(user.getBio());
-        existing.setAvatarUrl(user.getAvatarUrl());
-        
-        return userRepository.save(existing);
+    public Optional<User> findByUsername(String username) {
+        return userRepository.findByUsername(username);
+    }
+
+    public User getUserById(String id) {
+        return userRepository.findById(id)
+            .orElseThrow(() -> new RuntimeException("User not found"));
     }
 }

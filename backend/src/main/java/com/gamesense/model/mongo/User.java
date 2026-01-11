@@ -9,8 +9,8 @@ import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.LocalDateTime;
+import java.util.Set;
 
-// ========== User Entity (MongoDB) ==========
 @Document(collection = "users")
 @Data
 @Builder
@@ -26,14 +26,13 @@ public class User {
     @Indexed(unique = true)
     private String email;
     
-    private String password; // Hashed
+    private String password; // BCrypt Hash
     
-    private UserRole role;
-    
+    private Set<String> roles; // e.g., ["ROLE_USER", "ROLE_ADMIN"]
+
     private String bio;
     private String avatarUrl;
     
     private LocalDateTime createdAt;
-    private LocalDateTime lastLoginAt;
+    private LocalDateTime updatedAt;
 }
-

@@ -1,60 +1,54 @@
 package com.gamesense.controller;
 
-import com.gamesense.model.mongo.*;
-import com.gamesense.service.*;
+import com.gamesense.model.mongo.User;
+import com.gamesense.security.JwtTokenProvider;
+import com.gamesense.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
-import com.gamesense.model.neo4j.GameStatus;
-
-import jakarta.validation.Valid;
-
-// ========== User Controller ==========
 @RestController
-@RequestMapping("/api/users")
+@RequestMapping("/api/auth")
 @RequiredArgsConstructor
-@Tag(name = "Users", description = "User management")
+@Tag(name = "Authentication", description = "User registration and login")
 public class UserController {
 
     private final UserService userService;
-    private final ConsistencyService consistencyService;
+    private final AuthenticationManager authenticationManager;
+    private final JwtTokenProvider jwtTokenProvider;
 
-    @GetMapping("/{id}")
-    @Operation(summary = "Get user by ID")
-    public ResponseEntity<User> getUserById(@PathVariable String id) {
-        return userService.getUserById(id)
-            .map(ResponseEntity::ok)
-            .orElse(ResponseEntity.notFound().build());
+    @PostMapping("/register")
+    @Operation(summary = "Register new user")
+    public ResponseEntity<User> register(@RequestBody User user) {
+        return ResponseEntity.ok(userService.registerUser(user));
     }
 
-    @PostMapping
-    @Operation(summary = "Create user")
-    public ResponseEntity<User> createUser(@Valid @RequestBody User user) {
-        return ResponseEntity.ok(userService.createUser(user));
-    }
-
-    @PutMapping("/{id}")
-    @Operation(summary = "Update user")
-    public ResponseEntity<User> updateUser(
-            @PathVariable String id,
-            @Valid @RequestBody User user) {
-        return ResponseEntity.ok(userService.updateUser(id, user));
-    }
-
-    @PostMapping("/{userId}/games/{gameId}")
-    @Operation(summary = "Add game to user library")
-    public ResponseEntity<Void> addGameToLibrary(
-            @PathVariable String userId,
-            @PathVariable String gameId,
-            @RequestParam String status) {
-        consistencyService.addGameToLibrary(
-            userId,
-            gameId,
-            GameStatus.valueOf(status.toUpperCase())
+    @PostMapping("/login")
+    @Operation(summary = "Authenticate user and get token")
+    public ResponseEntity<AuthResponse> login(@RequestBody AuthRequest request) {
+        Authentication authentication = authenticationManager.authenticate(
+                new UsernamePasswordAuthenticationToken(request.getUsername(), request.getPassword())
         );
-        return ResponseEntity.ok().build();
+
+        String token = jwtTokenProvider.generateToken(authentication);
+        return ResponseEntity.ok(new AuthResponse(token));
+    }
+    
+    @Data
+    public static class AuthRequest {
+        private String username;
+        private String password;
+    }
+    
+    @Data
+    public static class AuthResponse {
+        private String token;
+        public AuthResponse(String token) { this.token = token; }
     }
 }

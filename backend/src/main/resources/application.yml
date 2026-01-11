@@ -29,6 +29,14 @@ spring:
     deserialization:
       fail-on-unknown-properties: false
 
+# SECURITY CONFIGURATION (Added)
+security:
+  jwt:
+    # 512-bit (64-byte) key encoded in Base64 (matches HS512 requirements)
+    # Default value provided here to prevent WeakKeyException if env var is missing
+    secret: ${SECURITY_JWT_SECRET:c3VwZXJfc2VjcmV0X2tleV9mb3JfZ2FtZXNlbnNlX3Byb2plY3RfdGhhdF9tdXN0X2JlX3ZlcnlfbG9uZ19mb3JfaHM1MTJfY29tcGxpYW5jZV9hbmRfc2VjdXJpdHlfb2ZfdGhlX2FwcGxpY2F0aW9uXzIwMjVfMjAyNg==}
+    expiration: ${SECURITY_JWT_EXPIRATION:86400000} # 24 hours
+
 server:
   port: 8080
   error:

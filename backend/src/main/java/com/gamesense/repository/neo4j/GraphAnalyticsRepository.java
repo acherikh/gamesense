@@ -70,15 +70,19 @@ public interface GraphAnalyticsRepository extends Neo4jRepository<UserNode, Long
     );
     
     /**
-     * Multi-hop relationship: Find games through team connections
+     * Multi-hop relationship: Find games through team connections (limit to 50 people)
      */
     @Query("""
         MATCH (me:User {userId: $userId})-[:FOLLOWS_TEAM]->(t:Team)
-        MATCH (t)<-[:FOLLOWS_TEAM]-(other:User)-[:FOLLOWS_USER*1..2]-(friend:User)
+        WITH t, me
+        MATCH (t)<-[:FOLLOWS_TEAM]-(other:User)
+        WHERE other.userId <> $userId
+        WITH other LIMIT 50 
+
+        MATCH (other)-[:FOLLOWS_USER*1..2]-(friend:User)
         MATCH (friend)-[:OWNS {status: 'PLAYING'}]->(g:Game)
         WHERE NOT EXISTS((me)-[:OWNS]->(g))
-        WITH g, count(DISTINCT friend) as connections
-        RETURN g.gameId as gameId, g.title as title, connections
+        RETURN g.gameId as gameId, g.title as title, count(DISTINCT friend) as connections
         ORDER BY connections DESC
         LIMIT $limit
     """)

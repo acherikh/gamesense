@@ -24,15 +24,6 @@ public class AnalyticsAggregationService {
 
     /**
      * AGGREGATION PIPELINE 1: The Hype Meter (Trending Games)
-     * 
-     * Pipeline Steps:
-     * 1. Filter reviews from the last N days (velocity aspect)
-     * 2. Group by gameId to calculate review count and average rating
-     * 3. Sort by review count descending
-     * 4. Lookup game details
-     * 5. Project final result
-     * 
-     * Business Value: Identifies games experiencing spike in player activity
      */
     public List<TrendingGame> calculateHypeMeter(int days, int limit) {
         log.info("Calculating Hype Meter for last {} days", days);
@@ -40,8 +31,12 @@ public class AnalyticsAggregationService {
         LocalDateTime cutoffDate = LocalDateTime.now().minusDays(days);
         
         // Match stage: Filter recent reviews
+        // FIX: Check 'timestamp' OR 'createdAt' to handle manually inserted reviews
         MatchOperation matchRecent = match(
-            Criteria.where("timestamp").gte(cutoffDate)
+            new Criteria().orOperator(
+                Criteria.where("timestamp").gte(cutoffDate),
+                Criteria.where("createdAt").gte(cutoffDate)
+            )
         );
         
         // Group stage: Calculate stats per game
@@ -50,7 +45,7 @@ public class AnalyticsAggregationService {
             .avg("rating").as("avgRating")
             .first("gameId").as("gameId");
         
-        // Sort stage: Order by review count (velocity indicator)
+        // Sort stage: Order by review count
         SortOperation sortByCount = sort(
             Sort.by(Sort.Direction.DESC, "reviewCount")
         );
@@ -79,7 +74,6 @@ public class AnalyticsAggregationService {
             .and("avgRating").as("avgRating")
             .andExpression("reviewCount * avgRating").as("hypeScore");
         
-        // Build and execute aggregation
         Aggregation aggregation = newAggregation(
             matchRecent,
             groupByGame,
@@ -96,53 +90,35 @@ public class AnalyticsAggregationService {
             TrendingGame.class
         );
         
-        List<TrendingGame> trendingGames = results.getMappedResults();
-        log.info("Found {} trending games", trendingGames.size());
-        
-        return trendingGames;
+        return results.getMappedResults();
     }
 
     /**
      * AGGREGATION PIPELINE 2: Genre Dominance Over Time
-     * 
-     * Pipeline Steps:
-     * 1. Unwind genres array (games can have multiple genres)
-     * 2. Extract year from releaseDate
-     * 3. Group by year and genre, count occurrences
-     * 4. Sort by year and count
-     * 5. Group by year to find dominant genre
-     * 
-     * Business Value: Visualize industry trends and genre popularity shifts
      */
     public List<GenreTrend> analyzeGenreDominance() {
         log.info("Analyzing genre dominance over time");
         
-        // Unwind genres array
         UnwindOperation unwindGenres = unwind("genres");
         
-        // Project to extract year from releaseDate
         ProjectionOperation extractYear = project()
             .and("genres").as("genre")
             .andExpression("year(releaseDate)").as("year");
         
-        // Match: Filter out null years
         MatchOperation filterValidYears = match(
             Criteria.where("year").ne(null)
         );
         
-        // Group by year and genre
         GroupOperation groupByYearGenre = group("year", "genre")
             .count().as("gameCount")
             .first("year").as("year")
             .first("genre").as("genre");
         
-        // Sort by year and count
         SortOperation sortByYearCount = sort(
             Sort.by(Sort.Direction.ASC, "year")
                 .and(Sort.by(Sort.Direction.DESC, "gameCount"))
         );
         
-        // Group by year to get top genre per year
         GroupOperation groupByYear = group("year")
             .first("year").as("year")
             .first("genre").as("dominantGenre")
@@ -150,12 +126,10 @@ public class AnalyticsAggregationService {
             .push(new BasicDBObject("genre", "$genre")
                 .append("count", "$gameCount")).as("genreBreakdown");
         
-        // Sort by year
         SortOperation sortByYear = sort(
             Sort.by(Sort.Direction.ASC, "_id")
         );
         
-        // Project final structure
         ProjectionOperation projectResult = project()
             .and("_id").as("year")
             .and("dominantGenre").as("dominantGenre")
@@ -184,67 +158,49 @@ public class AnalyticsAggregationService {
 
     /**
      * AGGREGATION PIPELINE 3: Esports Team Win Rates
-     * 
-     * Pipeline Steps:
-     * 1. Filter finished matches
-     * 2. Unwind to create separate records for each team
-     * 3. Group by team to calculate win/loss stats
-     * 4. Calculate win rate percentage
-     * 5. Sort by win rate
-     * 
-     * Business Value: Performance metrics for esports teams
      */
     public List<TeamPerformance> calculateTeamWinRates(String gameTitle) {
         log.info("Calculating team win rates for game: {}", gameTitle);
         
-        // Match finished matches
         Criteria criteria = Criteria.where("status").is("FINISHED");
         if (gameTitle != null && !gameTitle.isEmpty()) {
             criteria = criteria.and("gameTitle").is(gameTitle);
         }
         MatchOperation matchFinished = match(criteria);
         
-        // Project to create team records
+        // FIX: Use andExpression for field-to-field comparison
+        // ComparisonOperators.valueOf("field").equalTo("otherField") treats "otherField" as a string literal.
+        
         ProjectionOperation projectTeamA = project()
             .and("teamAId").as("teamId")
             .and("teamAName").as("teamName")
             .and("winnerId").as("winnerId")
-            .and(ConditionalOperators.when(
-                ComparisonOperators.valueOf("teamAId").equalTo("winnerId") 
-            ).then(1).otherwise(0)).as("isWin");
+            .andExpression("teamAId == winnerId ? 1 : 0").as("isWin");
         
         ProjectionOperation projectTeamB = project()
             .and("teamBId").as("teamId")
             .and("teamBName").as("teamName")
             .and("winnerId").as("winnerId")
-            .and(ConditionalOperators.when(
-                ComparisonOperators.valueOf("teamBId").equalTo("winnerId")
-            ).then(1).otherwise(0)).as("isWin");
+            .andExpression("teamBId == winnerId ? 1 : 0").as("isWin");
         
-        // We need to union both projections - using facet
         FacetOperation facetTeams = facet()
             .and(projectTeamA).as("teamAMatches")
             .and(projectTeamB).as("teamBMatches");
         
-        // Project to merge arrays
         ProjectionOperation mergeArrays = project()
             .and(ArrayOperators.ConcatArrays.arrayOf("teamAMatches")
                 .concat("teamBMatches"))
             .as("allMatches");
         
-        // Unwind combined matches
         UnwindOperation unwindMatches = unwind("allMatches");
         
-        // Replace root
         ReplaceRootOperation replaceRoot = replaceRoot("allMatches");
         
-        // Group by team
         GroupOperation groupByTeam = group("teamId")
             .first("teamName").as("teamName")
             .sum("isWin").as("wins")
             .count().as("totalMatches");
         
-        // Project to calculate win rate
         ProjectionOperation calculateWinRate = project()
             .and("_id").as("teamId")
             .and("teamName").as("teamName")
@@ -252,7 +208,6 @@ public class AnalyticsAggregationService {
             .and("totalMatches").as("totalMatches")
             .andExpression("(wins / totalMatches) * 100").as("winRate");
         
-        // Sort by win rate
         SortOperation sortByWinRate = sort(
             Sort.by(Sort.Direction.DESC, "winRate")
         );
@@ -277,9 +232,6 @@ public class AnalyticsAggregationService {
         return results.getMappedResults();
     }
     
-    /**
-     * Additional: Review Sentiment Analysis by Game
-     */
     public List<SentimentAnalysis> analyzeSentimentByGame(int limit) {
         log.info("Analyzing sentiment distribution by game");
         

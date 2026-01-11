@@ -43,7 +43,6 @@ services:
   mongo-secondary-2:
     image: mongo:7.0
     container_name: mongo-secondary-2
-    # Update Command: Add --keyFile
     command: mongod --replSet rs0 --bind_ip_all --port 27019 --keyFile /etc/mongo/mongo-keyfile
     ports:
       - "27019:27019"
@@ -58,6 +57,7 @@ services:
       - gamesense-network
     depends_on:
       - mongo-primary 
+
   # Neo4j Graph Database
   neo4j:
     image: neo4j:5.13
@@ -113,9 +113,13 @@ services:
       SPRING_NEO4J_AUTHENTICATION_PASSWORD: password123
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
+      # API Keys
       IGDB_CLIENT_ID: ${IGDB_CLIENT_ID}
       IGDB_CLIENT_SECRET: ${IGDB_CLIENT_SECRET}
       PANDASCORE_API_KEY: ${PANDASCORE_API_KEY}
+      # Security Configuration (Matches application.yml structure)
+      SECURITY_JWT_SECRET: "c3VwZXJfc2VjcmV0X2tlX2Zvcl9nYW1lc2Vuc2VfcHJvamVjdF90aGF0X211c3RfYmVfdmVyeV9sb25nX2Zvcl9oczUxMl9jb21wbGlhbmNlX2FuZF9zZWN1cml0eV9vZl90aGVfYXBwbGljYXRpb25fMjAyNV8yMDI2"
+      SECURITY_JWT_EXPIRATION: 86400000
     networks:
       - gamesense-network
     depends_on:
