@@ -52,6 +52,7 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
             // 1. PUBLIC ENDPOINTS (Guest Access)
             .requestMatchers("/api/auth/**", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
+            .requestMatchers("/actuator/**").permitAll()
             .requestMatchers(HttpMethod.GET, "/api/games/**").permitAll()      // Guests can browse
             .requestMatchers(HttpMethod.GET, "/api/matches/**").permitAll()    // Guests can view scores
             .requestMatchers(HttpMethod.GET, "/api/analytics/trending").permitAll() // Guests can see hype
