@@ -62,7 +62,10 @@ public class AnalyticsAggregationService {
         LimitOperation limitResults = limit(limit);
         
         AggregationOperation lookupGame = getCustomLookupOperation();
-        UnwindOperation unwindGame = unwind("gameDetails");
+        
+        // FIX: preserveNullAndEmptyArrays = true (Left Outer Join)
+        // This ensures reviews are counted even if the Game lookup fails
+        UnwindOperation unwindGame = unwind("gameDetails", true);
         
         ProjectionOperation projectResult = project()
             .and("gameId").as("gameId")
@@ -82,7 +85,7 @@ public class AnalyticsAggregationService {
      */
     public List<GenreTrend> analyzeGenreDominance() {
         log.info("Analyzing genre dominance");
-        UnwindOperation unwindGenres = unwind("genres");
+        UnwindOperation unwindGenres = unwind("genres", true); // FIX: Safe unwind
         
         ProjectionOperation extractYear = project()
             .and("genres").as("genre")
@@ -127,7 +130,6 @@ public class AnalyticsAggregationService {
         }
         MatchOperation matchFinished = match(criteria);
         
-        // Safety Check
         long count = mongoTemplate.count(new org.springframework.data.mongodb.core.query.Query(criteria), "matches");
         if (count == 0) return Collections.emptyList();
 
@@ -157,7 +159,6 @@ public class AnalyticsAggregationService {
             .sum("isWin").as("wins")
             .count().as("totalMatches");
         
-        // FIX: Nested ArithmeticOperators to resolve chaining issue
         ProjectionOperation calculateWinRate = project()
             .and("_id").as("teamId")
             .and("teamName").as("teamName")
@@ -187,7 +188,9 @@ public class AnalyticsAggregationService {
         SortOperation sortByReviews = sort(Sort.by(Sort.Direction.DESC, "totalReviews"));
         LimitOperation limitResults = limit(limit);
         AggregationOperation lookupGame = getCustomLookupOperation();
-        UnwindOperation unwindGame = unwind("gameDetails");
+        
+        // FIX: Safe Unwind
+        UnwindOperation unwindGame = unwind("gameDetails", true);
         
         ProjectionOperation projectResult = project()
             .and("gameId").as("gameId")

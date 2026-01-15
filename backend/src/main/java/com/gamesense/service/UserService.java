@@ -7,12 +7,14 @@ import com.gamesense.repository.mongo.UserRepository;
 import com.gamesense.repository.neo4j.UserNodeRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
 import java.util.Collections;
@@ -29,7 +31,7 @@ public class UserService implements UserDetailsService {
     private final UserRepository userRepository;
     private final UserNodeRepository userNodeRepository;
     private final PasswordEncoder passwordEncoder;
-    private final ConsistencyService consistencyService; // Inject ConsistencyService
+    private final ConsistencyService consistencyService;
 
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
@@ -50,19 +52,23 @@ public class UserService implements UserDetailsService {
     public User registerUser(User user) {
         log.info("Registering new user: {}", user.getUsername());
         
+        // 1. DUPLICATE CHECK (Returns 409 Conflict)
         if (userRepository.existsByUsername(user.getUsername())) {
-            throw new RuntimeException("Username already exists");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Username already exists");
         }
         
         if (userRepository.existsByEmail(user.getEmail())) {
-            throw new RuntimeException("Email already exists");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Email already exists");
         }
         
         // Secure Password
         user.setPassword(passwordEncoder.encode(user.getPassword()));
         
-        // Default Role
-        user.setRoles(new HashSet<>(Collections.singletonList("ROLE_USER")));
+        // 2. ROLE FIX: Only set default if NO roles are provided
+        if (user.getRoles() == null || user.getRoles().isEmpty()) {
+            user.setRoles(new HashSet<>(Collections.singletonList("ROLE_USER")));
+        }
+        // If roles ARE provided (e.g. ROLE_ADMIN), we keep them.
         
         user.setCreatedAt(LocalDateTime.now());
         user.setUpdatedAt(LocalDateTime.now());

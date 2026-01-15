@@ -53,18 +53,31 @@ public class SecurityConfig {
             // 1. PUBLIC ENDPOINTS (Guest Access)
             .requestMatchers("/api/auth/**", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
             .requestMatchers("/actuator/**").permitAll()
-            .requestMatchers(HttpMethod.GET, "/api/games/**").permitAll()      // Guests can browse
-            .requestMatchers(HttpMethod.GET, "/api/matches/**").permitAll()    // Guests can view scores
-            .requestMatchers(HttpMethod.GET, "/api/analytics/trending").permitAll() // Guests can see hype
+            .requestMatchers(HttpMethod.GET, "/api/games/**").permitAll()
+            .requestMatchers(HttpMethod.GET, "/api/matches/**").permitAll()
+            
+            // ANALYTICS (Public)
+            .requestMatchers(HttpMethod.GET, "/api/analytics/trending").permitAll()
+            .requestMatchers(HttpMethod.GET, "/api/analytics/genres/**").permitAll()
+            .requestMatchers(HttpMethod.GET, "/api/analytics/teams/**").permitAll()
+            .requestMatchers(HttpMethod.GET, "/api/analytics/sentiment").permitAll()
 
             // 2. ADMIN ENDPOINTS (Strict Access)
-            .requestMatchers(HttpMethod.POST, "/api/games/**").hasRole("ADMIN")   // Only Admin creates 
-            .requestMatchers(HttpMethod.PUT, "/api/games/**").hasRole("ADMIN")    // Only Admin updates
-            .requestMatchers(HttpMethod.DELETE, "/api/games/**").hasRole("ADMIN") // Only Admin deletes
+            // Games
+            .requestMatchers(HttpMethod.POST, "/api/games/**").hasRole("ADMIN")
+            .requestMatchers(HttpMethod.PUT, "/api/games/**").hasRole("ADMIN")
+            .requestMatchers(HttpMethod.DELETE, "/api/games/**").hasRole("ADMIN")
+            // FIX: Matches (Locking out Eve)
+            .requestMatchers(HttpMethod.POST, "/api/matches/**").hasRole("ADMIN")
+            .requestMatchers(HttpMethod.PUT, "/api/matches/**").hasRole("ADMIN")
+            .requestMatchers(HttpMethod.DELETE, "/api/matches/**").hasRole("ADMIN")
+            // Analytics Admin
             .requestMatchers("/api/analytics/admin/**").hasRole("ADMIN")
             
             // 3. REGISTERED USER ENDPOINTS
-            .requestMatchers("/api/reviews/**").authenticated() // Only Users can post reviews (implied)
+            .requestMatchers("/api/reviews/**").authenticated()
+            .requestMatchers("/api/users/**").authenticated()
+            .requestMatchers("/api/graph/**").authenticated() 
             
             // 4. Default deny
             .anyRequest().authenticated()
@@ -84,6 +97,7 @@ public class SecurityConfig {
         configuration.setAllowedOrigins(List.of("*"));
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
+        configuration.setAllowCredentials(true); 
         
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);

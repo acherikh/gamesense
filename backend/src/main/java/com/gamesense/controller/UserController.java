@@ -14,6 +14,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+
 @RestController
 @RequestMapping("/api") // Changed to /api to match test script paths like /api/auth and /api/users
 @RequiredArgsConstructor
@@ -35,12 +36,20 @@ public class UserController {
     @PostMapping("/auth/login")
     @Operation(summary = "Authenticate user and get token")
     public ResponseEntity<AuthResponse> login(@RequestBody AuthRequest request) {
+        // 1. Authenticate
         Authentication authentication = authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(request.getUsername(), request.getPassword())
         );
 
+        // 2. Generate Token
         String token = jwtTokenProvider.generateToken(authentication);
-        return ResponseEntity.ok(new AuthResponse(token));
+        
+        // 3. FIX: Fetch User details to return ID
+        User user = userService.findByUsername(request.getUsername())
+                .orElseThrow(() -> new RuntimeException("User found in auth but not in DB"));
+
+        // 4. Return rich response
+        return ResponseEntity.ok(new AuthResponse(token, user.getId(), user.getUsername(), user.getEmail()));
     }
 
     // --- USER ENDPOINTS ---
@@ -65,6 +74,15 @@ public class UserController {
     @Data
     public static class AuthResponse {
         private String token;
-        public AuthResponse(String token) { this.token = token; }
+        private String id;
+        private String username;
+        private String email;
+
+        public AuthResponse(String token, String id, String username, String email) { 
+            this.token = token; 
+            this.id = id;
+            this.username = username;
+            this.email = email;
+        }
     }
 }

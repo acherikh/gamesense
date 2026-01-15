@@ -28,7 +28,7 @@ public class User {
     
     private String password; // BCrypt Hash
     
-    private Set<String> roles; // e.g., ["ROLE_USER", "ROLE_ADMIN"]
+    private Set<String> roles; // e.g., ["USER", "ADMIN"]
 
     private String bio;
     private String avatarUrl;
