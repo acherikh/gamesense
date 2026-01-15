@@ -9,6 +9,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 // ========== Analytics Controller ==========
 @RestController
@@ -18,6 +19,13 @@ import java.util.List;
 public class AnalyticsController {
 
     private final AnalyticsAggregationService analyticsService;
+    private final DeadLetterQueueService dlqService;
+
+    @GetMapping("/admin/dlq-monitor")
+    public ResponseEntity<List<Map>> getSystemHealth() {
+        List<Map> failures = dlqService.getPendingFailures();
+        return ResponseEntity.ok(failures);
+    }
 
     @GetMapping("/trending")
     @Operation(summary = "Hype Meter - Trending games by velocity")

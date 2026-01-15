@@ -6,6 +6,7 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 
 // ========== Dead Letter Queue Service ==========
@@ -15,6 +16,10 @@ import java.util.Map;
 public class DeadLetterQueueService {
 
     private final MongoTemplate mongoTemplate;
+
+    public List<Map> getPendingFailures() {
+        return mongoTemplate.findAll(Map.class, "dead_letter_queue");
+    }
 
     public void logFailedOperation(String operation, String userId, String resourceId, String status, String error) {
         log.error("Failed operation added to DLQ: operation={}, userId={}, resourceId={}, status={}, error={}",

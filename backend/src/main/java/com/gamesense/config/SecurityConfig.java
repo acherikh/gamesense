@@ -4,6 +4,7 @@ import com.gamesense.security.JwtAuthenticationFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
@@ -49,18 +50,24 @@ public class SecurityConfig {
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers(
-                    "/api/auth/**",
-                    "/swagger-ui/**",
-                    "/v3/api-docs/**",
-                    "/api/games/**",
-                    "/api/analytics/**",
-                    "/api/matches/**",
-                    "/actuator/**",
-                    "/error" // <--- CRITICAL FIX: Allows error messages to be shown
-                ).permitAll()
-                .anyRequest().authenticated()
-            )
+            // 1. PUBLIC ENDPOINTS (Guest Access)
+            .requestMatchers("/api/auth/**", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
+            .requestMatchers(HttpMethod.GET, "/api/games/**").permitAll()      // Guests can browse
+            .requestMatchers(HttpMethod.GET, "/api/matches/**").permitAll()    // Guests can view scores
+            .requestMatchers(HttpMethod.GET, "/api/analytics/trending").permitAll() // Guests can see hype
+
+            // 2. ADMIN ENDPOINTS (Strict Access)
+            .requestMatchers(HttpMethod.POST, "/api/games/**").hasRole("ADMIN")   // Only Admin creates 
+            .requestMatchers(HttpMethod.PUT, "/api/games/**").hasRole("ADMIN")    // Only Admin updates
+            .requestMatchers(HttpMethod.DELETE, "/api/games/**").hasRole("ADMIN") // Only Admin deletes
+            .requestMatchers("/api/analytics/admin/**").hasRole("ADMIN")
+            
+            // 3. REGISTERED USER ENDPOINTS
+            .requestMatchers("/api/reviews/**").authenticated() // Only Users can post reviews (implied)
+            
+            // 4. Default deny
+            .anyRequest().authenticated()
+        )
             .sessionManagement(session -> session
                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
             )
