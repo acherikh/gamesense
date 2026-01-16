@@ -1,7 +1,9 @@
 package com.gamesense.service;
 
 import com.gamesense.model.mongo.*;
+import com.gamesense.model.neo4j.TeamNode; 
 import com.gamesense.repository.mongo.*;
+import com.gamesense.repository.neo4j.TeamNodeRepository; 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -11,13 +13,13 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
-// ========== Match Service ==========
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class MatchService {
 
     private final MatchRepository matchRepository;
+    private final TeamNodeRepository teamNodeRepository; // Inject Neo4j 
 
     public List<Match> getLiveMatches() {
         return matchRepository.findByStatus(MatchStatus.LIVE);
@@ -48,7 +50,12 @@ public class MatchService {
         match.setUpdatedAt(LocalDateTime.now());
         
         Match saved = matchRepository.save(match);
-        log.info("Created match: {} vs {}", match.getTeamAName(), match.getTeamBName());
+        
+        // Sync Teams to Neo4j immediately
+        syncTeamToGraph(saved.getTeamAId(), saved.getTeamAName(), saved.getGameTitle());
+        syncTeamToGraph(saved.getTeamBId(), saved.getTeamBName(), saved.getGameTitle());
+        
+        log.info("Created match and synced teams: {} vs {}", match.getTeamAName(), match.getTeamBName());
         
         return saved;
     }
@@ -73,5 +80,23 @@ public class MatchService {
         }
         
         return matchRepository.save(existing);
+    }
+
+    // Helper to sync teams safely
+    private void syncTeamToGraph(String teamId, String name, String gameTitle) {
+        try {
+            if (teamId != null) {
+                TeamNode teamNode = teamNodeRepository.findByTeamId(teamId)
+                    .orElse(new TeamNode());
+                
+                teamNode.setTeamId(teamId);
+                teamNode.setName(name);
+                teamNode.setGameTitle(gameTitle);
+                teamNodeRepository.save(teamNode);
+            }
+        } catch (Exception e) {
+            log.error("Failed to sync team to Neo4j: {}", e.getMessage());
+            // Non-blocking error
+        }
     }
 }

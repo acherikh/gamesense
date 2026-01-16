@@ -183,12 +183,12 @@ class DataIngestionService:
             logger.error(f"Esports Fetch Error: {e}")
 
     def save_match(self, match_data):
-        # (Same logic as before, abbreviated for brevity but keeping core)
         try:
             opponents = match_data.get('opponents', [])
             team_a = opponents[0]['opponent'] if len(opponents) > 0 else {}
             team_b = opponents[1]['opponent'] if len(opponents) > 1 else {}
             
+            # Save Match to MongoDB
             match_doc = {
                 '_id': str(match_data['id']),
                 'teamAId': str(team_a.get('id', '')),
@@ -203,8 +203,25 @@ class DataIngestionService:
                 'updatedAt': datetime.now()
             }
             self.db.matches.update_one({'_id': match_doc['_id']}, {'$set': match_doc}, upsert=True)
+
+            # Sync Teams to Neo4j
+            with self.neo4j_driver.session() as session:
+                # Sync Team A
+                if match_doc['teamAId']:
+                    session.run("""
+                        MERGE (t:Team {teamId: $teamId})
+                        SET t.name = $name, t.gameTitle = $gameTitle
+                    """, {'teamId': match_doc['teamAId'], 'name': match_doc['teamAName'], 'gameTitle': match_doc['gameTitle']})
+                
+                # Sync Team B
+                if match_doc['teamBId']:
+                    session.run("""
+                        MERGE (t:Team {teamId: $teamId})
+                        SET t.name = $name, t.gameTitle = $gameTitle
+                    """, {'teamId': match_doc['teamBId'], 'name': match_doc['teamBName'], 'gameTitle': match_doc['gameTitle']})
+
         except Exception as e:
-            pass # Skip invalid matches
+            logger.error(f"Error saving match/team: {e}")
 
     def map_status(self, status):
         mapping = {'running': 'LIVE', 'finished': 'FINISHED', 'not_started': 'SCHEDULED'}
