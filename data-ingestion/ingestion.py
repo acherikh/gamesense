@@ -1,5 +1,6 @@
 import os
 import time
+from wsgiref import headers
 import requests
 import schedule
 import logging
@@ -168,6 +169,7 @@ class DataIngestionService:
 
         logger.info("Ingesting esports data...")
         headers = {'Authorization': f'Bearer {self.pandascore_api_key}'}
+        self._fetch_and_save_matches(headers, '/matches/past', {'per_page': 50, 'sort': '-begin_at'})
         self._fetch_and_save_matches(headers, '/matches/running')
         self._fetch_and_save_matches(headers, '/matches/upcoming', {'per_page': 20, 'sort': 'begin_at'})
     
